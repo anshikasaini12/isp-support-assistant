@@ -46,13 +46,12 @@ flowchart TD
 
 **Why this Flow/Page structure:** each journey (Connectivity Troubleshooting,
 Outage Check, Ticket Status) is its own flow, kept separate from the Default
-Start Flow, which acts purely as an intent router. This mirrors how the
-assignment's journeys are described — each is independently testable, and a
+Start Flow, which acts purely as an intent router. Each flow is independently testable, and a
 new journey can be added as a new flow without touching the others. Within
-each flow, "Collect X" pages handle only parameter collection, while a
-separate "Validate X" page handles the webhook call and outcome branching —
+each flow, "Collect" pages handle only parameter collection, while a
+separate "Validate" page handles the webhook call and outcome branching —
 this keeps user-facing prompts and backend integration cleanly separated,
-and made the retry-on-error logic (see below) straightforward to add without
+and made the retry-on-error logic straightforward to add without
 restructuring the collection pages.
 
 ## Running the webhook locally
@@ -61,7 +60,7 @@ restructuring the collection pages.
 pip install -r requirements.txt
 python app.py
 ```
-Runs on `http://localhost:8080`. Health check: `GET /health`.
+Runs on `http://localhost:8080`. 
 
 ## Running the webhook on Cloud Run (as deployed)
 
@@ -74,7 +73,7 @@ gcloud run deploy isp-webhook \
 ```
 
 No environment variables are required — the current implementation uses
-in-memory mock data for outages and tickets (see "Known limitations").
+in-memory mock data for outages and tickets.
 
 **Live URL used for this submission:**
 `https://isp-webhook-191502554280.us-central1.run.app/webhook`
@@ -118,16 +117,7 @@ collecting router status is detected via a webhook call (tag
 outage-related keywords, rather than relying on Dialogflow CX's built-in
 intent matching at that point in the conversation.
 
-**Why not rely on intent matching directly:** the `router_status` parameter
-uses entity type `@sys.any` (needed because router descriptions vary too
-widely for a closed entity set). Dialogflow CX's form-filling for an actively
-required `@sys.any` parameter consumes the very next utterance as the
-parameter value, even when that utterance also matches a defined intent with
-high NLU confidence — this is a known behavior of `@sys.any`'s catch-all
-matching, confirmed via the CX simulator's diagnostic trace during testing
-(intent scored 1.0 as an alternative match but was not the one triggered).
-Page-level explicit intent routes did not override this either, since
-parameter form-filling is evaluated ahead of route matching in this case.
+
 
 **Resolution:** the webhook-based keyword check runs after the parameter is
 captured, and correctly identifies the interruption regardless of how
@@ -143,13 +133,13 @@ timeline. Section "Known limitations" expands on the production fix.
 
 ## Production Considerations
 
-**What I'd monitor:**
+**monitor:**
 - **Webhook latency and failures** — Cloud Run's built-in request latency
   and error-rate metrics, plus structured logs (already emitted via Python's
   `logging` module) shipped to Cloud Logging, with alerts on elevated 5xx
   rates or p95 latency.
 - **No-match rate** — Dialogflow CX's built-in Analytics tab tracks this per
-  intent/page; I'd alert if it spikes above a baseline, since that usually
+  intent/page; alert if it spikes above a baseline, since that usually
   signals a recent training-phrase regression or a real-world phrasing gap.
 - **Conversation abandonment** — sessions that end without reaching a
   terminal "resolved"/"escalated"/"answered" page; would track via a custom
@@ -162,11 +152,6 @@ timeline. Section "Known limitations" expands on the production fix.
   no-match-default paths firing, as a proxy for where the bot is
   under-serving users.
 
-**Credentials/secrets:** none are currently required since the webhook uses
-mock in-memory data. If it called a real backend (ticketing system, outage
-API), credentials would be stored in **Google Secret Manager** and injected
-into Cloud Run as environment variables at deploy time — never committed to
-source control or hardcoded.
 
 **Sensitive customer information:** the current mock data contains no real
 PII. In production, any customer-identifying data (name, address, account
