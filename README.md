@@ -6,7 +6,7 @@ status lookups, backed by a Flask webhook deployed on Google Cloud Run.
 
 ## Contents
 
-- `app.py` — webhook entrypoint (Flask + Gunicorn)
+- `app.py` — webhook entrypoint (Flask)
 - `services/outage_service.py` — outage lookup business logic
 - `services/ticket_service.py` — ticket lookup business logic
 - `Dockerfile` — container build for Cloud Run
