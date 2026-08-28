@@ -4,6 +4,7 @@ Receives CX webhook requests, delegates to services/, returns CX-shaped
 webhook responses. No business logic lives in this file.
 """
 import logging
+import re
 from flask import Flask, request, jsonify
 
 from services.outage_service import check_outage, InvalidZipError
@@ -54,6 +55,8 @@ def webhook():
             return handle_router_status_check(body)
         elif tag == "analyze-troubleshooting":
             return handle_analyze_troubleshooting(body)
+        elif tag == "extract-zip":
+            return handle_extract_zip(body)
         else:
             logger.warning("Unknown tag received: %s", tag)
             return jsonify(cx_text_response(
@@ -87,6 +90,20 @@ def handle_router_status_check(body):
     return jsonify({
         "fulfillment_response": {"messages": []},
         "sessionInfo": {"parameters": {"is_interruption": False}},
+    }), 200
+
+
+_ZIP_IN_TEXT_PATTERN = re.compile(r"\b\d{4,6}\b")
+
+
+def handle_extract_zip(body):
+    raw_text = body.get("text") or ""
+    match = _ZIP_IN_TEXT_PATTERN.search(raw_text)
+    zip_found = match.group(0) if match else None
+    logger.info("Extracted zip from text %r: %r", raw_text, zip_found)
+    return jsonify({
+        "fulfillment_response": {"messages": []},
+        "sessionInfo": {"parameters": {"zip_code": zip_found}},
     }), 200
 
 
