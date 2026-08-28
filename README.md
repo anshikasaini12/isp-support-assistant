@@ -6,7 +6,7 @@ status lookups, backed by a Flask webhook deployed on Google Cloud Run.
 
 ## Contents
 
-- `app.py` — webhook entrypoint (Flask)
+- `app.py` — webhook entrypoint (Flask + Gunicorn)
 - `services/outage_service.py` — outage lookup business logic
 - `services/ticket_service.py` — ticket lookup business logic
 - `Dockerfile` — container build for Cloud Run
@@ -46,12 +46,13 @@ flowchart TD
 
 **Why this Flow/Page structure:** each journey (Connectivity Troubleshooting,
 Outage Check, Ticket Status) is its own flow, kept separate from the Default
-Start Flow, which acts purely as an intent router. Each flow is independently testable, and a
+Start Flow, which acts purely as an intent router. This mirrors how the
+assignment's journeys are described — each is independently testable, and a
 new journey can be added as a new flow without touching the others. Within
-each flow, "Collect" pages handle only parameter collection, while a
-separate "Validate" page handles the webhook call and outcome branching —
+each flow, "Collect X" pages handle only parameter collection, while a
+separate "Validate X" page handles the webhook call and outcome branching —
 this keeps user-facing prompts and backend integration cleanly separated,
-and made the retry-on-error logic straightforward to add without
+and made the retry-on-error logic (see below) straightforward to add without
 restructuring the collection pages.
 
 ## Running the webhook locally
@@ -60,7 +61,7 @@ restructuring the collection pages.
 pip install -r requirements.txt
 python app.py
 ```
-Runs on `http://localhost:8080`. 
+Runs on `http://localhost:8080`. Health check: `GET /health`.
 
 ## Running the webhook on Cloud Run (as deployed)
 
@@ -73,7 +74,7 @@ gcloud run deploy isp-webhook \
 ```
 
 No environment variables are required — the current implementation uses
-in-memory mock data for outages and tickets.
+in-memory mock data for outages and tickets (see "Known limitations").
 
 **Live URL used for this submission:**
 `https://isp-webhook-191502554280.us-central1.run.app/webhook`
@@ -98,8 +99,14 @@ manually via the Dialogflow CX simulator and `curl`/PowerShell requests
 directly against the webhook, covering all scenarios listed below.
 
 **Scenarios manually verified:**
-- Connectivity troubleshooting: happy path (issue resolved) and escalation
-  path (issue not resolved)
+- Connectivity troubleshooting: happy path (issue resolved) and full
+  3-tier escalation ladder (basic → advanced → diagnostic → human agent)
+- Cognitive slot-filling: full information given upfront (direct to
+  advanced tier, skipping both questions), partial information given
+  upfront (skipping only the answered question)
+- Inline ZIP extraction for Outage Check (skipping the ZIP question
+  entirely when mentioned in the triggering utterance)
+- Sentiment-aware empathy prefix on frustrated initial messages
 - Outage check: outage found, no outage, invalid ZIP (with retry)
 - Ticket status: found, invalid format (with retry), valid format but not
   found (with retry)
@@ -117,7 +124,16 @@ collecting router status is detected via a webhook call (tag
 outage-related keywords, rather than relying on Dialogflow CX's built-in
 intent matching at that point in the conversation.
 
-
+**Why not rely on intent matching directly:** the `router_status` parameter
+uses entity type `@sys.any` (needed because router descriptions vary too
+widely for a closed entity set). Dialogflow CX's form-filling for an actively
+required `@sys.any` parameter consumes the very next utterance as the
+parameter value, even when that utterance also matches a defined intent with
+high NLU confidence — this is a known behavior of `@sys.any`'s catch-all
+matching, confirmed via the CX simulator's diagnostic trace during testing
+(intent scored 1.0 as an alternative match but was not the one triggered).
+Page-level explicit intent routes did not override this either, since
+parameter form-filling is evaluated ahead of route matching in this case.
 
 **Resolution:** the webhook-based keyword check runs after the parameter is
 captured, and correctly identifies the interruption regardless of how
@@ -131,15 +147,63 @@ Dialogflow CX's page-jump constraints (a flow can only be re-entered at its
 Start Page, not at an arbitrary page inside it) within the assignment's
 timeline. Section "Known limitations" expands on the production fix.
 
+## Cognitive / Context-Aware Enhancements
+
+Following a follow-up request from the reviewing team, the Connectivity
+Troubleshooting flow was extended beyond simple sequential form-filling to
+demonstrate context-aware, less deterministic behavior:
+
+**Single-utterance slot-filling.** When a user's very first message already
+describes their troubleshooting steps (e.g. *"I've already restarted the
+modem and tested LAN and Wi-Fi on my laptop and phone, still not
+working"*), a webhook call (tag `analyze-troubleshooting`) parses the raw
+utterance for device-scope and router-status information already given,
+and pre-fills those session parameters. The `Device Scope` and
+`Router Status` pages then skip their own questions automatically when the
+matching session parameter is already set — this reuses Dialogflow CX's
+built-in behavior of treating a page parameter as filled if a session
+parameter of the same name already has a value, rather than needing
+custom logic on every page.
+
+**Inline entity extraction.** Similarly, Outage Check parses the triggering
+utterance for a ZIP/postal code (tag `extract-zip`) before asking for one
+explicitly — e.g. *"Is there an outage in 560001?"* is answered directly
+without a follow-up question.
+
+**Multi-tier escalation instead of an immediate handoff.** Rather than
+routing straight to a human agent once basic troubleshooting has already
+been described as failed, the flow offers two further tiers of
+suggestions — a more advanced fix, then a diagnostic step — before
+escalating. This ladder is shared by both entry paths: a user who answers
+the standard questions one at a time, and a user who describes everything
+upfront in one message, go through the same three-tier sequence before
+reaching a human agent.
+
+**Sentiment-aware acknowledgment.** The same analysis webhook checks the
+initial utterance for frustration cues (e.g. *"third time calling"*,
+*"already told you"*) and prefixes the response with a brief empathetic
+acknowledgment when detected, rather than responding identically
+regardless of tone.
+
+All of this logic lives in the webhook rather than in Dialogflow CX's
+native NLU/entity system, because CX's built-in slot-filling for a
+required `@sys.any` parameter (used here since real troubleshooting
+descriptions vary too widely for a closed entity set) consumes the next
+utterance for that parameter even when a defined intent also matches with
+high confidence — the same limitation described in "Interruption &
+Resumption Approach" above. Parsing centrally in the webhook, driven by
+the raw request text, sidesteps that limitation reliably across every
+page it's needed.
+
 ## Production Considerations
 
-**monitor:**
+**What I'd monitor:**
 - **Webhook latency and failures** — Cloud Run's built-in request latency
   and error-rate metrics, plus structured logs (already emitted via Python's
   `logging` module) shipped to Cloud Logging, with alerts on elevated 5xx
   rates or p95 latency.
 - **No-match rate** — Dialogflow CX's built-in Analytics tab tracks this per
-  intent/page; alert if it spikes above a baseline, since that usually
+  intent/page; I'd alert if it spikes above a baseline, since that usually
   signals a recent training-phrase regression or a real-world phrasing gap.
 - **Conversation abandonment** — sessions that end without reaching a
   terminal "resolved"/"escalated"/"answered" page; would track via a custom
@@ -152,6 +216,11 @@ timeline. Section "Known limitations" expands on the production fix.
   no-match-default paths firing, as a proxy for where the bot is
   under-serving users.
 
+**Credentials/secrets:** none are currently required since the webhook uses
+mock in-memory data. If it called a real backend (ticketing system, outage
+API), credentials would be stored in **Google Secret Manager** and injected
+into Cloud Run as environment variables at deploy time — never committed to
+source control or hardcoded.
 
 **Sensitive customer information:** the current mock data contains no real
 PII. In production, any customer-identifying data (name, address, account
