@@ -176,9 +176,12 @@ def handle_outage_check(body):
         result = check_outage(str(zip_code) if zip_code is not None else "")
     except InvalidZipError:
         logger.info("Invalid zip provided: %r", zip_code)
-        return jsonify(cx_text_response(
-            "That doesn't look like a valid ZIP or postal code. Could you share it again?"
-        )), 200
+        return jsonify({
+            "fulfillment_response": {"messages": [{"text": {"text": [
+                "That doesn't look like a valid ZIP or postal code. Could you share it again?"
+            ]}}]},
+            "sessionInfo": {"parameters": {"lookup_success": False, "zip_code": None}},
+        }), 200
 
     if result["outage"]:
         text = ("Yes, there's a known outage in your area (" + result["area"] + "). "
@@ -188,7 +191,7 @@ def handle_outage_check(body):
 
     return jsonify({
         "fulfillment_response": {"messages": [{"text": {"text": [text]}}]},
-        "sessionInfo": {"parameters": {"outage_result": result}},
+        "sessionInfo": {"parameters": {"outage_result": result, "lookup_success": True}},
     }), 200
 
 
