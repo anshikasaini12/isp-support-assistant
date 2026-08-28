@@ -148,11 +148,7 @@ def handle_analyze_troubleshooting(body):
     params["escalate_immediately"] = escalate_immediately
 
     if escalate_immediately:
-        text = (
-            "It sounds like you've already " + " and ".join(details) + ", "
-            "and the issue is still not resolved. I'll escalate this directly "
-            "to our support team — they'll reach out to you shortly."
-        )
+        text = ""
     elif params.get("device_scope") or params.get("router_status"):
         text = "Got it, thanks for the details."
     else:
