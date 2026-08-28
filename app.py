@@ -116,11 +116,15 @@ _CONNECTION_TEST_HINTS = ("lan", "wi-fi", "wifi", "ethernet")
 _STILL_FAILING_HINTS = ("still not working", "still not resolved", "issue is still not resolved",
                         "not resolved", "still broken", "still down", "still an issue",
                         "problem persists", "issue persists", "still having the issue")
+_FRUSTRATION_HINTS = ("frustrated", "annoyed", "again", "already told", "keep having",
+                      "third time", "several times", "sick of", "fed up", "ridiculous")
 
 
 def handle_analyze_troubleshooting(body):
     raw_text = (body.get("text") or "").lower()
     logger.info("Analyzing initial troubleshooting utterance: %r", raw_text)
+
+    is_frustrated = any(h in raw_text for h in _FRUSTRATION_HINTS)
 
     params = {}
 
@@ -147,10 +151,14 @@ def handle_analyze_troubleshooting(body):
     escalate_immediately = already_tried_something and still_failing
     params["escalate_immediately"] = escalate_immediately
 
+    empathy_prefix = "I hear you, and I'm sorry for the trouble. " if is_frustrated else ""
+
     if escalate_immediately:
         text = ""
     elif params.get("device_scope") or params.get("router_status"):
-        text = "Got it, thanks for the details."
+        text = empathy_prefix + "Got it, thanks for the details."
+    elif is_frustrated:
+        text = "I hear you, and I'm sorry for the trouble — let's get this sorted out."
     else:
         text = ""
 
