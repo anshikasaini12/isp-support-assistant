@@ -6,7 +6,7 @@ status lookups, backed by a Flask webhook deployed on Google Cloud Run.
 
 ## Contents
 
-- `app.py` — webhook entrypoint (Flask + Gunicorn)
+- `app.py` — webhook entrypoint (Flask)
 - `services/outage_service.py` — outage lookup business logic
 - `services/ticket_service.py` — ticket lookup business logic
 - `Dockerfile` — container build for Cloud Run
@@ -60,8 +60,7 @@ restructuring the collection pages.
 ```bash
 pip install -r requirements.txt
 python app.py
-```
-Runs on `http://localhost:8080`. Health check: `GET /health`.
+```.
 
 ## Running the webhook on Cloud Run (as deployed)
 
@@ -76,8 +75,6 @@ gcloud run deploy isp-webhook \
 No environment variables are required — the current implementation uses
 in-memory mock data for outages and tickets (see "Known limitations").
 
-**Live URL used for this submission:**
-`https://isp-webhook-191502554280.us-central1.run.app/webhook`
 
 ## Configuring / importing the Dialogflow CX agent
 
